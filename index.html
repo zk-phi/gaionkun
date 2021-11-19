@@ -1,0 +1,87 @@
+<head>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+  <link rel="stylesheet" href="style.css" type="text/css">
+  <link rel="manifest" href="manifest.json">
+  <script src="./vue.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <section v-if="!standalone">
+      <h1>外音取り込み君</h1>
+      <div>
+        外音をマイクで取り込んで、イヤホンなどから流します。 Chrome のみ動作確認。
+      </div>
+      <div>
+        <button v-if="installEvent" class="link" @click="install">
+          アプリとしてインストールするとオフラインでも使えます！
+        </button>
+      </div>
+    </section>
+    <section>
+      <h2>入力:</h2>
+      <select v-model="selectedInput">
+        <option v-for="dev in inputDevices" :value="dev.deviceId">{{ dev.label }}</option>
+      </select>
+    </section>
+    <section>
+      <h2>出力:</h2>
+      <select v-model="selectedOutput">
+        <option v-for="dev in outputDevices" :value="dev.deviceId">{{ dev.label }}</option>
+      </select>
+      <small>スピーカーはハウリング注意です</small>
+    </section>
+    <section>
+      <label>
+        <input v-model="enableNoiseReduction" type="checkbox">
+        ノイズ軽減
+      </label>
+      <small>目立つ音だけを取り込みます</small>
+    </section>
+    <section>
+      <label>残響: {{ wetValue }}%</label>
+      <input v-model="wetValue" type="range" min="0" max="100" step="1">
+      <small>作業用 BGM に良いという噂です</small>
+    </section>
+    <section>
+      <label>音量: {{ gainValue }}%</label>
+      <input v-model="gainValue" type="range" min="0" max="500" step="1">
+    </section>
+    <section v-if="showDetails">
+      <label>Delay: {{ delayValue }}s</label>
+      <input v-model="delayValue" type="range" min="0.0" max="3.0" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>Cutoff: {{ filterFreq }}hz</label>
+      <input v-model="filterFreq" type="range" min="0" max="300" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>LowMid: {{ lowMidValue }}db</label>
+      <input v-model="lowMidValue" type="range" min="-40" max="40" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>Mid: {{ midValue }}db</label>
+      <input v-model="midValue" type="range" min="-40" max="40" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>HiMid: {{ hiMidValue }}db</label>
+      <input v-model="hiMidValue" type="range" min="-40" max="40" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>High: {{ highValue }}db</label>
+      <input v-model="highValue" type="range" min="-40" max="40" step="0.1">
+    </section>
+    <section v-if="showDetails">
+      <label>DeEss: {{ deEssValue }}db</label>
+      <input v-model="deEssValue" type="range" min="-40" max="40" step="0.1">
+    </section>
+    <section>
+      <button @click="showDetails = !showDetails" class="link">
+        {{ showDetails ? "- 閉じる" : "+ その他のオプション" }}
+      </button>
+    </section>
+    <button class="button" @click="toggle" v-bind:style="{ 'background': buttonBg }">
+      {{ enabled ? "停止" : "開始" }}
+    </button>
+  </div>
+  <script src="./script.js"></script>
+</body>
