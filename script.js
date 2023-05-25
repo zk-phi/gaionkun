@@ -2,6 +2,103 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js");
 }
 
+class ReverbNode extends GainNode {
+  constructor (ctx, options) {
+    super(ctx, { gain: 1 });
+    this._dryGainNode = new GainNode(ctx, {
+      gain: (1 - options.wetness),
+    });
+    this._wetGainNode = new GainNode(ctx, {
+      gain: options.wetness,
+    });
+    this._convolverNode = new ConvolverNode(ctx, {
+      buffer: options.buffer,
+    });
+    this.connect(this._dryGainNode);
+    this.connect(this._convolverNode);
+    this._convolverNode.connect(this._wetGainNode);
+    this.connect = (node) => {
+      this._dryGainNode.connect(node);
+      this._wetGainNode.connect(node);
+    };
+    this.disconnect = (node) => {
+      this._dryGainNode.disconnect(node);
+      this._wetGainNode.disconnect(node);
+    }
+  }
+
+  setWetness (value) {
+    this._dryGainNode.gain.value = (1 - value);
+    this._wetGainNode.gain.value = value;
+  }
+}
+
+class SurgicalEqNode extends GainNode {
+  constructor (ctx, options) {
+    super(ctx, { gain: 1 });
+    this._filters = (new Array(options.octave)).fill(null).map((_, ix) => (
+      new BiquadFilterNode(ctx, {
+        type: "peaking",
+        frequency: options.frequency * Math.pow(2, ix),
+        Q: options.Q,
+        gain: options.gain,
+      })
+    ));
+    const outNode = this._filters.reduce((l, r) => l.connect(r), this);
+    this.connect(this._filters[0]);
+    this.connect = (node) => outNode.connect(node);
+    this.disconnect = (node) => outNode.disconnect(node);
+  }
+
+  setFrequency (value) {
+    this._filters.forEach((node, ix) => node.frequency.value = value * Math.pow(2, ix));
+  }
+
+  setGain (value) {
+    this._filters.forEach((node, ix) => node.gain.value = value);
+  }
+
+  setQ (value) {
+    this._filters.forEach((node, ix) => node.Q.value = value);
+  }
+}
+
+class EqualizerNode extends GainNode {
+  constructor (ctx, options) {
+    super(ctx, { gain: 1 });
+    this._filters = new Array(options.bands).fill(null).map((_, ix) => (
+      new BiquadFilterNode(ctx, {
+        type: ix == 0 ? "lowshelf" : ix == options.bands - 1 ? "highshelf" : "peaking",
+        frequency: options.frequencies[ix],
+        Q: options.Qs[ix],
+        gain: options.gains[ix],
+      })
+    ));
+    const outNode = this._filters.reduce((l, r) => l.connect(r), this);
+    this.connect(this._filters[0]);
+    this.connect = (node) => outNode.connect(node);
+    this.disconnect = (node) => outNode.disconnect(node);
+  }
+
+  setFrequencies (freqs) {
+    freqs.forEach((v, ix) => this._filters[ix].frequency.value = v);
+  }
+
+  setGains (gains) {
+    gains.forEach((v, ix) => this._filters[ix].gain.value = v);
+  }
+
+  setQs (qs) {
+    qs.forEach((v, ix) => this._filters[ix].Q.value = v);
+  }
+}
+
+async function getIRBuf (ctx, url) {
+  const IR = await fetch("./hamilton_mausoleum.wav");
+  const IRbuf = await IR.arrayBuffer();
+  return await ctx.decodeAudioData(IRbuf);
+}
+
 const data = {
   /* status */
   enabled: false,
@@ -19,30 +116,24 @@ const data = {
   wetValue: 0,
   gainValue: 100,
   delayValue: 0.0,
-  lowMidValue: -2.00,
-  midValue: -4.00,
-  hiMidValue: +4.00,
+  precompEqGains: [-30, -4, -8, -4, 0],
+  // 62.501, 256.52, 860.48, 3192.8, 9682.6
+  precompEqLogFreqs: [0.41, 0.55, 0.67, 0.80, 0.91],
+  precompEqQs: [1, 3.49, 1.92, 1.96, 1],
   highValue: +8.00,
-  deEssValue: -20,
-  filterFreq: 120,
+  deEssValue: -8.00,
+  deEssFreq: 2100,
   enableNoiseReduction: false,
   /* webaudio things */
   ctx: null,
   sourceNode: null,
   delayNode: null,
-  filterNode: null,
   gainNode: null,
+  equalizerNode: null,
   compressorNode: null,
-  lowMid: null,
-  mid: null,
-  hiMid: null,
   high: null,
-  deEss1: null,
-  deEss2: null,
-  deEss3: null,
-  dryGainNode: null,
-  wetGainNode: null,
-  convolverNode: null,
+  deEss: null,
+  reverbNode: null,
   analyzerNode: null,
   destinationNode: null,
   audio: null,
@@ -64,6 +155,13 @@ window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
 });
 
+const FFT_SIZE = 256;
+const SAMPLE_RATE = 48000;
+const MAX_FREQ = 24000;
+const LOG_MAX_FREQ = Math.log2(24000);
+
+Vue.filter("trim", v => `${v}`.substring(0, 7));
+
 const vm = new Vue({
   el: "#app",
   data: data,
@@ -76,18 +174,23 @@ const vm = new Vue({
     vm.inputDevices = devs.filter(dev => dev.kind === "audioinput");
     vm.outputDevices = devs.filter(dev => dev.kind === "audiooutput");
   },
+  computed: {
+    precompEqFreqs: function () {
+      return this.precompEqLogFreqs.map(v => Math.pow(2, v * LOG_MAX_FREQ));
+    },
+  },
   watch: {
     selectedInput: () => vm.reconnectSource(),
-    selectedOutput: () => vm.updateOutput(),
-    wetValue: () => vm.updateWettiness(),
-    gainValue: () => vm.updateGain(),
-    delayValue: () => vm.updateDelay(),
-    filterFreq: () => vm.updateFilter(),
-    lowMidValue: () => vm.updateLowMid(),
-    midValue: () => vm.updateMid(),
-    hiMidValue: () => vm.updateHiMid(),
-    highValue: () => vm.updateHigh(),
-    deEssValue: () => vm.updateDeEss(),
+    selectedOutput: () => vm.ctx && vm.audio.setSinkId(vm.selectedOutput),
+    wetValue: () => vm.ctx && vm.reverbNode.setWetness(vm.wetValue / 100),
+    gainValue: () => vm.ctx && (vm.gainNode.gain.value = vm.gainValue / 100),
+    delayValue: () => vm.ctx && (vm.delayNode.delayTime.value = vm.delayValue),
+    precompEqFreqs: () => vm.ctx && vm.equalizerNode.setFrequencies(vm.precompEqFreqs),
+    precompEqGains: () => vm.ctx && vm.equalizerNode.setGains(vm.precompEqGains),
+    precompEqQs: () => vm.ctx && vm.equalizerNode.setQs(vm.precompEqQs),
+    highValue: () => vm.ctx && (vm.high.gain.value = vm.highValue),
+    deEssValue: () => vm.ctx && vm.deEss.setGain(vm.deEssValue),
+    deEssFreq: () => vm.ctx && vm.deEss.setFrequency(vm.deEssFreq),
     enableNoiseReduction: () => vm.reconnectSource(),
     value: () => {
       const p = (vm.value + 60) / 60 * 100;
@@ -116,23 +219,15 @@ const vm = new Vue({
          *
          *   delayNode
          *       |
-         *  filterNode
-         *       |
          *    gainNode
+         *       |
+         *      Eq1
          *       |
          * compressorNode
          *       |
-         *   Eq, De-Ess
+         *  Eq2, De-Ess
          *       |
-         *       +--------+
-         *       |        |
-         *       |  convolverNode
-         *       |        |
-         *  dryGainNode   |
-         *       |        |
-         *       |   wetGainNode
-         *       |        |
-         *       +--------+
+         *     Reverb
          *       |
          *  analyzerNode
          *       |
@@ -140,78 +235,43 @@ const vm = new Vue({
          *       |
          *     audio
          */
-        vm.ctx = new AudioContext();
+        vm.ctx = new AudioContext({
+          sampleRate: SAMPLE_RATE,
+        });
         vm.delayNode = new DelayNode(vm.ctx, {
           delayTime: vm.delayValue,
           maxDelayTime: 3,
         });
-        vm.filterNode = new BiquadFilterNode(vm.ctx, {
-          type: "highpass",
-          frequency: vm.filterFreq,
-          Q: 1,
-        });
         vm.gainNode = new GainNode(vm.ctx, {
           gain: vm.gainValue / 100,
         });
+        vm.equalizerNode = new EqualizerNode(vm.ctx, {
+          bands: 5,
+          frequencies: vm.precompEqFreqs,
+          Qs: vm.precompEqQs,
+          gains: vm.precompEqGains,
+        });
         vm.compressorNode = new DynamicsCompressorNode(vm.ctx, {});
-        vm.lowMid = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 244.3,
-          Q: 3.49,
-          gain: vm.lowMidValue,
-        });
-        vm.mid = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 824.9,
-          Q: 1.92,
-          gain: vm.midValue,
-        });
-        vm.hiMid = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 3250,
-          Q: 1.96,
-          gain: vm.hiMidValue,
-        });
         vm.high = new BiquadFilterNode(vm.ctx, {
           type: "highshelf",
           frequency: 9570,
           gain: vm.highValue,
         });
-        vm.deEss1 = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 2100,
+        vm.deEss = new SurgicalEqNode(vm.ctx, {
+          octave: 4,
+          frequency: vm.deEssFreq,
           Q: 50,
           gain: vm.deEssValue,
         });
-        vm.deEss2 = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 4200,
-          Q: 50,
-          gain: vm.deEssValue,
-        });
-        vm.deEss3 = new BiquadFilterNode(vm.ctx, {
-          type: "peaking",
-          frequency: 8400,
-          Q: 50,
-          gain: vm.deEssValue,
-        });
-        vm.dryGainNode = new GainNode(vm.ctx, {
-          gain: 1 - (vm.wetValue / 100),
-        });
-        vm.wetGainNode = new GainNode(vm.ctx, {
-          gain: vm.wetValue / 100,
-        });
-        /* taken from the Open AIR Library under the CC-BY License */
-        const IR = await fetch("./hamilton_mausoleum.wav");
-        const IRbuf = await IR.arrayBuffer();
-        const decodefIRBuf = await vm.ctx.decodeAudioData(IRbuf);
-        vm.convolverNode = new ConvolverNode(vm.ctx, {
-          buffer: decodefIRBuf,
+        vm.reverbNode = new ReverbNode(vm.ctx, {
+          wetness: vm.wetValue / 100,
+          /* taken from the Open AIR Library under the CC-BY License */
+          buffer: await getIRBuf(vm.ctx, "./hamilton_mausoleum.wav"),
         });
         vm.analyzerNode = new AnalyserNode(vm.ctx, {
-          fftSize: 512,
+          fftSize: FFT_SIZE,
         });
-        let buf = new Float32Array(512);
+        let buf = new Float32Array(FFT_SIZE);
         setInterval(() => {
           vm.analyzerNode.getFloatTimeDomainData(buf);
           const value = Math.max(Math.max(...buf), - Math.min(...buf), 1e-128);
@@ -223,12 +283,10 @@ const vm = new Vue({
         vm.audio.srcObject = vm.destinationNode.stream;
         vm.audio.setSinkId(vm.selectedOutput);
         vm.audio.play();
-        vm.delayNode.connect(vm.filterNode).connect(vm.gainNode).connect(vm.compressorNode);
-        vm.compressorNode.connect(vm.lowMid).connect(vm.mid).connect(vm.hiMid).connect(vm.high);
-        vm.high.connect(vm.deEss1).connect(vm.deEss2).connect(vm.deEss3);
-        vm.deEss3.connect(vm.dryGainNode).connect(vm.analyzerNode);
-        vm.deEss3.connect(vm.convolverNode).connect(vm.wetGainNode).connect(vm.analyzerNode);
-        vm.analyzerNode.connect(vm.destinationNode);
+        vm.delayNode.connect(vm.gainNode).connect(vm.equalizerNode).connect(vm.compressorNode);
+        vm.compressorNode.connect(vm.high).connect(vm.deEss).connect(vm.reverbNode)
+        vm.reverbNode.connect(vm.destinationNode);
+        vm.reverbNode.connect(vm.analyzerNode);
       }
     },
     reconnectSource: async () => {
@@ -239,9 +297,11 @@ const vm = new Vue({
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
             deviceId: vm.selectedInput,
-            autoGainControl: false,
-            noiseSuppression: vm.enableNoiseReduction,
-            echoCancellation: true,
+            autoGainControl: { ideal: false },
+            noiseSuppression: { ideal: vm.enableNoiseReduction },
+            echoCancellation: { ideal: false },
+            sampleRate: { ideal: SAMPLE_RATE },
+            sampleSize: { ideal: 24 },
           },
           video: false,
         });
@@ -255,64 +315,6 @@ const vm = new Vue({
       vm.sourceNode.mediaStream.getTracks().map(track => track.stop());
       vm.sourceNode.disconnect();
       vm.sourceNode = null;
-    },
-    updateGain: () => {
-      if (vm.ctx) {
-        vm.gainNode.gain.value = vm.gainValue / 100;
-      }
-    },
-    updateWettiness: () => {
-      if (vm.ctx) {
-        vm.dryGainNode.gain.value = 1 - (vm.wetValue / 100);
-        vm.wetGainNode.gain.value = vm.wetValue / 100;
-      }
-    },
-    updateDelay: () => {
-      if (vm.ctx) {
-        vm.delayNode.delayTime.value = vm.delayValue;
-      }
-    },
-    updateFilter: () => {
-      if (vm.ctx) {
-        vm.filterNode.frequency.value = vm.filterFreq;
-      }
-    },
-    updateEq1: () => {
-      if (vm.ctx) {
-        vm.eq1.gain.value = vm.eq1Value;
-      }
-    },
-    updateLowMid: () => {
-      if (vm.ctx) {
-        vm.lowMid.gain.value = vm.lowMidValue;
-      }
-    },
-    updateMid: () => {
-      if (vm.ctx) {
-        vm.mid.gain.value = vm.midValue;
-      }
-    },
-    updateHiMid: () => {
-      if (vm.ctx) {
-        vm.hiMid.gain.value = vm.hiMidValue;
-      }
-    },
-    updateHigh: () => {
-      if (vm.ctx) {
-        vm.high.gain.value = vm.highValue;
-      }
-    },
-    updateDeEss: () => {
-      if (vm.ctx) {
-        vm.deEss1.gain.value = vm.deEssValue;
-        vm.deEss2.gain.value = vm.deEssValue;
-        vm.deEss3.gain.value = vm.deEssValue;
-      }
-    },
-    updateOutput: () => {
-      if (vm.ctx) {
-        vm.audio.setSinkId(vm.selectedOutput);
-      }
     },
     start: async () => {
       if (!vm.ctx) {

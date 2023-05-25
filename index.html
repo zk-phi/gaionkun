@@ -16,13 +16,13 @@
       </button>
     </section>
     <section>
-      <h2>入力:</h2>
+      <label>入力:</label>
       <select v-model="selectedInput">
         <option v-for="dev in inputDevices" :value="dev.deviceId">{{ dev.label }}</option>
       </select>
     </section>
     <section>
-      <h2>出力:</h2>
+      <label>出力:</label>
       <select v-model="selectedOutput">
         <option v-for="dev in outputDevices" :value="dev.deviceId">{{ dev.label }}</option>
       </select>
@@ -45,32 +45,74 @@
       <input v-model="gainValue" type="range" min="0" max="500" step="1">
     </section>
     <section v-if="showDetails">
-      <label>Delay: {{ delayValue }}s</label>
+      <h2>Delay</h2>
+      <label>Time: {{ delayValue }}s</label>
       <input v-model="delayValue" type="range" min="0.0" max="3.0" step="0.1">
     </section>
     <section v-if="showDetails">
-      <label>Cutoff: {{ filterFreq }}hz</label>
-      <input v-model="filterFreq" type="range" min="0" max="300" step="0.1">
+      <h2>Pre-comp Eq</h2>
+      <div>
+        <label>Lowshelf: {{ precompEqFreqs[0] | trim }}hz</label>
+        <input v-model="precompEqLogFreqs[0]" type="range" min="0.01" max="1" step="0.01">
+      </div>
+      <div>
+        <label>Lowshelf Gain: {{ precompEqGains[0] }}db</label>
+        <input v-model="precompEqGains[0]" type="range" min="-40" max="0" step="0.1">
+      </div>
+      <div>
+        <label>LowMid: {{ precompEqFreqs[1] | trim }}hz</label>
+        <input v-model="precompEqLogFreqs[1]" type="range" min="0.01" max="1" step="0.01">
+      </div>
+      <div>
+        <label>LowMid Q: {{ precompEqQs[1] }}</label>
+        <input v-model="precompEqQs[1]" type="range" min="0.05" max="5" step="0.05">
+      </div>
+      <div>
+        <label>LowMid Gain: {{ precompEqGains[1] }}db</label>
+        <input v-model="precompEqGains[1]" type="range" min="-40" max="0" step="0.1">
+      </div>
+      <div>
+        <label>Mid: {{ precompEqFreqs[2] | trim }}hz</label>
+        <input v-model="precompEqLogFreqs[2]" type="range" min="0.01" max="1" step="0.01">
+      </div>
+      <div>
+        <label>Mid Q: {{ precompEqQs[2] }}</label>
+        <input v-model="precompEqQs[2]" type="range" min="0.05" max="5" step="0.05">
+      </div>
+      <div>
+        <label>Mid Gain: {{ precompEqGains[2] }}db</label>
+        <input v-model="precompEqGains[2]" type="range" min="-40" max="0" step="0.1">
+      </div>
+      <div>
+        <label>HiMid: {{ precompEqFreqs[3] | trim }}hz</label>
+        <input v-model="precompEqLogFreqs[3]" type="range" min="0.01" max="1" step="0.01">
+      </div>
+      <div>
+        <label>HiMid Q: {{ precompEqQs[3] }}</label>
+        <input v-model="precompEqQs[3]" type="range" min="0.05" max="5" step="0.05">
+      </div>
+      <div>
+        <label>HiMid Gain: {{ precompEqGains[3] }}db</label>
+        <input v-model="precompEqGains[3]" type="range" min="-40" max="0" step="0.1">
+      </div>
     </section>
     <section v-if="showDetails">
-      <label>LowMid: {{ lowMidValue }}db</label>
-      <input v-model="lowMidValue" type="range" min="-40" max="40" step="0.1">
+      <h2>Highshelf</h2>
+      <div>
+        <label>Gain: {{ highValue }}db</label>
+        <input v-model="highValue" type="range" min="0" max="40" step="0.1">
+      </div>
     </section>
     <section v-if="showDetails">
-      <label>Mid: {{ midValue }}db</label>
-      <input v-model="midValue" type="range" min="-40" max="40" step="0.1">
-    </section>
-    <section v-if="showDetails">
-      <label>HiMid: {{ hiMidValue }}db</label>
-      <input v-model="hiMidValue" type="range" min="-40" max="40" step="0.1">
-    </section>
-    <section v-if="showDetails">
-      <label>High: {{ highValue }}db</label>
-      <input v-model="highValue" type="range" min="-40" max="40" step="0.1">
-    </section>
-    <section v-if="showDetails">
-      <label>DeEss: {{ deEssValue }}db</label>
-      <input v-model="deEssValue" type="range" min="-40" max="40" step="0.1">
+      <h2>De-Ess</h2>
+      <div>
+        <label>Freq: {{ deEssFreq }}Hz</label>
+        <input v-model="deEssFreq" type="range" min="0" max="4000" step="1">
+      </div>
+      <div>
+        <label>Gain: {{ deEssValue }}db</label>
+        <input v-model="deEssValue" type="range" min="-40" max="40" step="0.1">
+      </div>
     </section>
     <section>
       <button @click="showDetails = !showDetails" class="link">
